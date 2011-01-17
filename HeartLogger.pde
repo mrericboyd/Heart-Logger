@@ -38,7 +38,7 @@ String filename;
 String HSVersion = "";
 
 GUIController c;
-IFButton b1, b2, b3;
+IFButton b1, b2, b3, b4;
 IFTextField t;
 IFLabel l;
 
@@ -68,6 +68,10 @@ void setup () {
   b3 = new IFButton ("Quit", 360, 120, 40, 17);
   b3.addActionListener(this);
   c.add (b3);
+  
+  b4 = new IFButton ("Grab ALL Data", 200, 170, 120, 17);
+  b4.addActionListener(this);
+  c.add (b4);
   
   t = new IFTextField("Text Field", 25, 30, 400);
   c.add(t);
@@ -123,6 +127,9 @@ void actionPerformed (GUIEvent e) {
   }
   if (e.getSource() == b3) {
     quit = true;
+  }
+  if (e.getSource() == b4) {
+    GrabAllData();
   }
 }
 
@@ -210,6 +217,85 @@ void StartDataAcq()
   while (myPort.available() > 0)
   print((char)myPort.read());
 }
+
+
+void GrabAllData()
+{
+  // check if HS has been detected
+  if (HSVersion == "")
+  {
+    l.setLabel("Heart Spark not present?  Have you Opened Serial Port?");
+    return;  // bail now
+  } 
+
+  // check if the file they have specified already exists
+  //filename = t.getValue();  // file.exists() doesn't seem to work this way!!
+  filename = dataPath(t.getValue());
+  File file = new File(filename);
+  println("file: " + filename);
+  if(file.exists())
+  {
+    l.setLabel("File already exists!  Rename and try again.");
+    return;
+  }
+
+  // set to get ALL data
+  NumPages = 511;
+  DataAcq = true;
+  l.setLabel((NumPages) + " pages of data to get");
+
+    // start the file with a nice message
+    output = createWriter(filename);
+    output.println("Heart Spark by http://sensebridge.net/");
+    output.println("Heart Spark V" + HSVersion + ";  Heart Logger V" + SoftwareVersion);
+
+  // ok, now we do a bunch of prep work:
+  //  - read the date from the Heart Spark, and log that to file
+  //  - reset date on HS to computer date, i.e. resync
+  //  - read number of pages of data that Heart Spark thinks it has
+  //  - set flag that will start data acquisition from main loop
+
+    // get date from the heart spark
+    myPort.write(100); // 'd', get date
+    delay(100);
+    println(myPort.available());
+    GetParseData(7);  // get the data into buffer[]
+    parseDateIntoEPOCH();  // fill logEPOCH with our date
+    output.print("RTC Date,");
+    output.print(logEPOCH/1000L);
+    output.print(",");
+    outputDate();
+
+    // now stuff out OUR date
+    Date d = new Date();
+    logEPOCH=d.getTime();
+    output.print("Real Date,");
+    output.print(logEPOCH/1000L);
+    output.print(",");
+    outputDate();
+    
+    // now set the date - later we make GUI for this
+    myPort.write(68);  // 'D', set date
+    while(myPort.available() == 0){delay(1);}
+    bufferedValue = myPort.read();
+    if (bufferedValue == 68)  // HeartSpark echos back the D to let us know it's ready
+    {  // then the firmware is ready for the date, dump it in csv format
+      date = new java.text.SimpleDateFormat("yy,MM,dd,HH,mm,ss,,").format(new java.util.Date (logEPOCH));
+      myPort.write(date);
+      myPort.write("\r\n");
+    }
+    println("finished setting date");
+    
+    // finish the header with a legend row
+    output.println("TimeStamp,Minutes,Data,Date,Time,Year,Month,dayOfMonth,Hour,Minute,Second");  
+    FirstPage = true;
+    
+  // throw away any junk that might be in the serial buffer: 
+  delay(1000);
+  while (myPort.available() > 0)
+  print((char)myPort.read());
+}
+
 
 void StopDataAcq()
 {  // stop data acquisition, close the file, reset the Heart Spark logging
@@ -423,7 +509,7 @@ void DoStartup()
 
     SerialPortOpen = true;
     println("Serial Port Opened... checking for Heart Spark");
-    delay(2500); // the arduino needs time to get itself ready for serial input...
+    delay(2000); // the arduino needs time to get itself ready for serial input...
    
     // we don't need to stop logging, and it's possible to leave the 
     // device in a no-logging state by accident, so I'm not doing
@@ -432,13 +518,13 @@ void DoStartup()
     //delay(100);  // wait for another wake cycle
     
     myPort.write(99); // 'c', Toggle Chatter, make the Serial quiet except for data
-    delay(100);  // wait to be sure all the junk has arrived
+    delay(500);  // wait to be sure all the junk has arrived
     while (myPort.available() > 0)
       print((char)myPort.read());  // throw away all the junk that's there now
         
     // OK, check if we actually have a Heart Spark open
     myPort.write(118); // 'v', get version number
-    delay(100);
+    delay(500);
     //println(myPort.available());
     if (myPort.available() == 5) // 3 characters plus \r\n
     {
